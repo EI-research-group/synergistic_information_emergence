@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Feb  3 09:57:17 2021
+
+@author: tvarley
+"""
+
+import os
+import pandas as pd
+import networkx as nx
+from dit.pid import PID_WB
+import numpy as np 
+import matplotlib.pyplot as plt
+from library import equilibrium_dist, make_microscale, pid_dicts, dit_dist, tpm_temporal_MI
+from scipy.stats import linregress
+
+out_dir = '/geode2/home/u100/tvarley/Carbonate/Libraries/PID_emergence/results/gaussian/'
+lattice_dir = '/geode2/home/u100/tvarley/Carbonate/Libraries/PID_emergence/'
+in_dir = '/geode2/home/u100/tvarley/Carbonate/Libraries/PID_emergence/results/gaussian/pid_3/'
+listdir = os.listdir(in_dir)
+
+lattice_3 = nx.read_gml(lattice_dir + "lattice_3.gml")
+layers_3 = nx.shortest_path_length(source="{0}{1}{2}", G=lattice_3)
+num_layers_3 = max(layers_3.values())+1
+
+def synergy_bias(spectrum):
+    dist = np.arange(spectrum.shape[0])
+    return (dist * spectrum).sum() / (dist.max())
+
+def redundancy_bias(spectrum):
+    dist = np.arange(spectrum.shape[0])[::-1]
+    return (dist * spectrum).sum() / (dist.max())
+
+#%%
+
+tensor = np.zeros((8,8,200))
+
+df = pd.DataFrame(columns=["MI", "red", "syn"])
+
+for j in range(tensor.shape[2]):
+    mat = np.abs(np.random.randn(8,8))
+    
+    for i in range(mat.shape[0]):
+        mat[i] = mat[i] / mat[i].sum()
+    
+    eq = equilibrium_dist(mat)
+    df.loc[j,"MI"] = tpm_temporal_MI(eq, mat)
+    
+    Dist = dit_dist(eq, mat)
+    imin = PID_WB(Dist)
+    
+    pid = pid_dicts(imin)[1]
+
+    array = np.array(pid, dtype="object")
+    np.savez_compressed(out_dir + "pid_3/{0}.npz".format(j), array)
+    
+    totals_3 = {i : 0.0 for i in range(num_layers_3)}
+    
+    for num in totals_3.keys():
+        totals_3[num] += sum([pid[x][1] for x in pid.keys() if layers_3[x] == num]) / df.loc[j, "MI"]
+    spectrum = np.array(list(totals_3.values()))
+    
+    df.loc[j, "red"] = redundancy_bias(spectrum)
+    df.loc[j, "syn"] = synergy_bias(spectrum)
+    
+    tensor[:,:,j] = mat
+    print(j)
+
+np.savez_compressed(out_dir + "tensor.npz", tensor)
+df.to_csv(out_dir + "gaussian_results.csv", sep=",")
+
